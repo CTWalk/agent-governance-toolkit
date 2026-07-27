@@ -138,11 +138,11 @@ parameters:
       - name: agent-control-specification-linux-x64-gnu
         binary: agent-control-specification.linux-x64-gnu.node
         rustTarget: x86_64-unknown-linux-gnu
-        vmImage: ubuntu-latest
+        vmImage: ubuntu-22.04  # glibc 2.35 floor for broad Linux portability
       - name: agent-control-specification-linux-arm64-gnu
         binary: agent-control-specification.linux-arm64-gnu.node
         rustTarget: aarch64-unknown-linux-gnu
-        vmImage: ubuntu-latest
+        vmImage: ubuntu-22.04  # glibc 2.35 floor for broad Linux portability
         aptPackages: gcc-aarch64-linux-gnu
         linkerEnv: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER
         linker: aarch64-linux-gnu-gcc
@@ -195,11 +195,11 @@ parameters:
       - rid: linux-x64
         nativeLib: libagent_control_specification_core.so
         rustTarget: x86_64-unknown-linux-gnu
-        vmImage: ubuntu-latest
+        vmImage: ubuntu-22.04  # glibc 2.35 floor for broad Linux portability
       - rid: linux-arm64
         nativeLib: libagent_control_specification_core.so
         rustTarget: aarch64-unknown-linux-gnu
-        vmImage: ubuntu-latest
+        vmImage: ubuntu-22.04  # glibc 2.35 floor for broad Linux portability
         aptPackages: gcc-aarch64-linux-gnu
         linkerEnv: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER
         linker: aarch64-linux-gnu-gcc
