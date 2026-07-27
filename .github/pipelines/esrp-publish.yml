@@ -229,12 +229,18 @@ parameters:
 #   ESRP_KEYVAULT_NAME, ESRP_SIGN_CERT_IDENTIFIER, ESRP_RELEASE_CERT_IDENTIFIER,
 #   ESRP_NUGET_SIGN_CERT_IDENTIFIER, ESRP_CLIENT_ID, ESRP_OWNERS, ESRP_APPROVERS
 #
-# ESRP_CLIENT_ID                  = ESRP registration (AAD app) id; the managed
-#                                   identity is registered as its Associated App Id
-# ESRP_SIGN_CERT_IDENTIFIER       = request-signing cert name in the Key Vault
-# ESRP_NUGET_SIGN_CERT_IDENTIFIER = request-signing cert name (NuGet sign path)
-# ESRP_RELEASE_CERT_IDENTIFIER    = request-signing cert name (EsrpRelease path)
-# In the MI model these three resolve to the SAME request-signing cert.
+# ESRP_CLIENT_ID                  = ESRP registration (AAD app) id the signing
+#                                   tasks run as; the managed identity is set as
+#                                   its Associated App Id for cert-less MI auth
+# ESRP_SIGN_CERT_IDENTIFIER       = cert name for EsrpCodeSigning AuthSignCertName
+#                                   (Authenticode/DLL sign path)
+# ESRP_NUGET_SIGN_CERT_IDENTIFIER = cert name for EsrpCodeSigning AuthSignCertName
+#                                   (NuGet package sign path)
+# ESRP_RELEASE_CERT_IDENTIFIER    = cert name for EsrpRelease signcertname
+#                                   (PyPI/npm/crates release path)
+# Each cert identifier is a separate variable so a path can point at a different
+# Key Vault cert if needed. Under the current MI setup they are configured to the
+# same OneCertV2-PublicCA request-signing cert.
 # MICROSOFT_TENANT_ID (below)     = tenant hosting the identity, vault, and cert (AME).
 #
 # ESRP_AUTH_CERT_IDENTIFIER is no longer used (auth cert removed under MI auth).
