@@ -23,6 +23,7 @@ The module is structured as a thin re-export layer so external callers
 only need ``from agt.policies import ...``.
 """
 
+from .agent_hooks import AcsInterceptor
 from .manifest import (
     AdapterManifestContract,
     AgtManifest,
@@ -50,6 +51,7 @@ from .snapshot import (
 )
 
 __all__ = [
+    "AcsInterceptor",
     "AdapterManifestContract",
     "AdapterRuntimeSession",
     "AgtManifest",
