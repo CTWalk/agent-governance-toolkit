@@ -35,12 +35,12 @@ HERE = Path(__file__).resolve().parent
 
 # The local open-weight model these quickstarts run against. Override with the
 # ACS_EXAMPLE_MODEL / OLLAMA_BASE_URL environment variables.
-_MODEL = os.environ.get("ACS_EXAMPLE_MODEL", "ollama/qwen2.5:latest")
+_MODEL = os.environ.get("ACS_EXAMPLE_MODEL", "ollama/llama3.1:latest")
 _OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
 def build_llm() -> LLM:
-    """Return the local model client (Qwen 2.5 via Ollama), pinned for reproducibility."""
+    """Return the local model client (Llama 3.1 via Ollama), pinned for reproducibility."""
     return LLM(model=_MODEL, base_url=_OLLAMA_BASE_URL, temperature=0)
 
 

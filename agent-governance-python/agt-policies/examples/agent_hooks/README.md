@@ -54,7 +54,7 @@ runnable `run.py`.
 
 ## Running them
 
-The examples run against a **real local open-weight model** — Qwen 2.5 served by
+The examples run against a **real local open-weight model** — Llama 3.1 served by
 [Ollama](https://ollama.com) — so the output you see comes from an actual model,
 not a canned response. The model is pinned and run with `temperature=0` for
 reproducibility, and each script checks the endpoint is reachable first.
@@ -62,7 +62,7 @@ reproducibility, and each script checks the endpoint is reachable first.
 ```bash
 # one-time setup
 ollama serve &            # start the local model server
-ollama pull qwen2.5       # pull the model (~4.7 GB)
+ollama pull llama3.1      # pull the model (~4.9 GB)
 
 python examples/agent_hooks/01_single_agent_single_policy/run.py
 python examples/agent_hooks/02_multi_agent_multi_policy/run.py
@@ -73,7 +73,7 @@ Point them at a different model or host with environment variables — the ACS
 integration is identical:
 
 ```bash
-export ACS_EXAMPLE_MODEL=ollama/llama3.1:latest   # any Ollama model
+export ACS_EXAMPLE_MODEL=ollama/llama3.2:latest   # any Ollama model
 export OLLAMA_BASE_URL=http://localhost:11434      # or a remote host
 ```
 
@@ -84,7 +84,7 @@ export OLLAMA_BASE_URL=http://localhost:11434      # or a remote host
 - [`opa`](https://www.openpolicyagent.org/) on your `PATH` (the policies are
   authored in Rego).
 - `crewai` with agent-hooks support (`crewai.hooks.use_agent_hooks`).
-- [Ollama](https://ollama.com) running locally with the `qwen2.5` model pulled
+- [Ollama](https://ollama.com) running locally with the `llama3.1` model pulled
   (or another model via `ACS_EXAMPLE_MODEL`).
 
 ## Surfacing the decision to your users
