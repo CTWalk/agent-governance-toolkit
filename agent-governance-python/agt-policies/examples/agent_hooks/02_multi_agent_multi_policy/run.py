@@ -103,14 +103,17 @@ def main() -> int:
     )
 
     # One line injects ACS across both agents for the whole run.
+    result = None
     try:
         with use_agent_hooks(acs):
             result = crew.kickoff()
-    except Exception as error:  # noqa: BLE001 - surface any governance decision
-        print("\nA policy blocked the run")
-        print(f"{type(error).__name__}: {error}")
-        return 1
+    except Exception as error:
+        raise AssertionError(
+            f"a policy blocked the benign workflow: {type(error).__name__}: {error}"
+        ) from error
 
+    # Assert governance stayed out of the way of a legitimate, benign workflow.
+    assert result is not None, "the crew returned no result"
     print("\nCrew completed under 3 policies across 2 agents")
     print(str(result))
     print("\nOK: every agent lifecycle was governed; the benign workflow passed.")

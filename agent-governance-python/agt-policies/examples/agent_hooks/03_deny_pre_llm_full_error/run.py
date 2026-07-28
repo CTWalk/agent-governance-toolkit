@@ -99,23 +99,28 @@ def main() -> int:
 
     # 4. Inject ACS into every agent in the crew for the duration of the run.
     #    A customer's own code is exactly this `try/except`.
+    error_text = ""
     try:
         with use_agent_hooks(acs):
             crew.kickoff()
     except Exception as error:  # noqa: BLE001 - demonstrate the customer surface
+        error_text = str(error)
         print("\nGovernance decision surfaced to the caller")
         print(f"{type(error).__name__}: {error}")
-        if "blocked_prohibited_prompt" in str(error):
-            print(
-                "\nOK: ACS denied the call at pre_model_call, so no request was "
-                f"ever sent to {_MODEL}, and the full policy reason reached the caller."
-            )
-            return 0
-        print("\nUNEXPECTED: the block did not behave as documented.")
-        return 1
 
-    print("UNEXPECTED: the crew completed; the prompt firewall did not fire.")
-    return 1
+    # Assert the governance behaviour this quickstart promises.
+    assert error_text, "the crew completed; the prompt firewall never fired"
+    assert "blocked_prohibited_prompt" in error_text, (
+        f"expected the prompt-firewall deny, got: {error_text}"
+    )
+    assert "credentials" in error_text, (
+        "the full policy message did not reach the caller"
+    )
+    print(
+        "\nOK: ACS denied the call at pre_model_call, so no request was ever "
+        f"sent to {_MODEL}, and the full policy reason reached the caller."
+    )
+    return 0
 
 
 if __name__ == "__main__":

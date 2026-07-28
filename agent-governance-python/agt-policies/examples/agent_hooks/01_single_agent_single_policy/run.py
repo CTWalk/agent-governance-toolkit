@@ -109,13 +109,16 @@ def main() -> int:
     print(f"\n[2] Ticket with SSN-shaped reference -> completed={leaked}")
     print(f"    governance: {message}")
 
-    passed = ok and (not leaked) and "blocked_pii_in_output" in message
-    print(
-        "\nOK: the policy allowed the safe summary and blocked the PII leak."
-        if passed
-        else "\nNOTE: the model's real output did not trigger the guard this run."
+    # Assert the governance behaviour this quickstart demonstrates.
+    assert ok, f"the benign summary was blocked unexpectedly: {text}"
+    assert not leaked, (
+        "the SSN-shaped reference reached the user — the output guard never fired"
     )
-    return 0 if passed else 1
+    assert "blocked_pii_in_output" in message, (
+        f"expected the PII output guard to fire, got: {message}"
+    )
+    print("\nOK: the policy allowed the safe summary and blocked the PII leak.")
+    return 0
 
 
 if __name__ == "__main__":
