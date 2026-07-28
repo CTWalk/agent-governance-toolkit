@@ -29,9 +29,14 @@ verdict := pre_model_call_verdict if input.intervention_point == "pre_model_call
 verdict := output_verdict if input.intervention_point == "output"
 
 # --- input_firewall: block prompt-injection in the incoming request ---------
+# crewAI delivers the kickoff `inputs` mapping at the `input` point, not a flat
+# string, so scan every string leaf of the (possibly structured) payload.
 default input_text := ""
 
-input_text := lower(input.policy_target.value) if is_string(input.policy_target.value)
+input_text := lower(concat(" ", [leaf |
+	walk(input.policy_target.value, [_, leaf])
+	is_string(leaf)
+]))
 
 input_verdict := deny(
 	"blocked_prompt_injection",
