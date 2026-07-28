@@ -221,9 +221,13 @@ jobs:
           set -euo pipefail
           pip install --no-cache-dir "pydantic>=2.5.0,<3.0" "pyyaml>=6.0,<7.0"
           pip install --no-cache-dir --no-deps -e agent-governance-python/agt-policies
-          pip install --no-cache-dir crewai
+          # Pinned exactly for reproducible, supply-chain-safe installs. crewai
+          # 1.15.6 is the release exposing crewai.hooks.use_agent_hooks; the
+          # agent-hooks SDK is pinned to the validated commit (a git dep has no
+          # version, so pin the ref). Bump both deliberately.
+          pip install --no-cache-dir crewai==1.15.6
           pip install --no-cache-dir \
-            "agent-hooks-sdk @ git+https://github.com/responsibleai/agent-hooks.git#subdirectory=sdk/python"
+            "agent-hooks-sdk @ git+https://github.com/responsibleai/agent-hooks.git@30e53198dc923e1fcc60e9244ddb1f526d8977c3#subdirectory=sdk/python"
 
       - name: Cache Ollama model
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
