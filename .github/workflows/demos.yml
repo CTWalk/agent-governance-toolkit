@@ -158,17 +158,29 @@ jobs:
       - name: Run governance demo against open-source model
         run: python examples/demos/maf_governance_demo.py --model "$AGT_DEMO_MODEL"
 
-  # crewAI governance assertions: prove the agt-policies AcsInterceptor injects
+  # crewAI governance quickstarts: prove the agt-policies AcsInterceptor injects
   # Agent Control Specification governance into a real crewAI crew via the
-  # framework-neutral agent-hooks contract. Runs the interceptor test suite,
-  # which asserts the shipped example manifests deny prompt-injection, secret
-  # exfiltration, and PII, and that a real crew is blocked at pre_model_call —
-  # deterministically, with a scripted model (no external model endpoint).
+  # framework-neutral agent-hooks contract. Runs all three example scripts,
+  # which self-assert against a real local model (Llama 3.1 via Ollama): a
+  # benign summary is allowed, a PII leak and a prompt-injection are blocked,
+  # and a prohibited prompt is denied at pre_model_call before the model runs.
   agent-hooks-demo:
     needs: changes
     if: needs.changes.outputs.agent-hooks-demo == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The examples run against a real, pinned, checksum-verified model; each
+      # asserts its governance outcome and exits non-zero on failure.
+      ACS_EXAMPLE_MODEL: ollama/llama3.1:latest
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      # Take crewAI's first-run tracing prompt default instead of collecting.
+      CREWAI_TRACING_ENABLED: "false"
+      OLLAMA_VERSION: "0.5.7"
+      OLLAMA_V0_5_7_LINUX_AMD64_SHA256: 8d4e054bc512d53115074c19de5a7915df78180f89c014abbae4497e4a813a3c
+      AGT_DEMO_MODEL: llama3.1
+      AGT_DEMO_MODEL_DIGEST: 46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e
+      OLLAMA_MODELS: /home/runner/.ollama/models
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -208,7 +220,7 @@ jobs:
         # source (ubuntu-latest provides the Rust toolchain).
         run: |
           set -euo pipefail
-          pip install --no-cache-dir "pydantic>=2.5.0,<3.0" "pyyaml>=6.0,<7.0" "pytest==8.3.4"
+          pip install --no-cache-dir "pydantic>=2.5.0,<3.0" "pyyaml>=6.0,<7.0"
           pip install --no-cache-dir --no-deps -e agent-governance-python/agt-policies
           # Pinned exactly for reproducible, supply-chain-safe installs. crewAI's
           # use_agent_hooks lives in the source tree (not the PyPI release), so
@@ -219,14 +231,77 @@ jobs:
           pip install --no-cache-dir \
             "agent-hooks-sdk @ git+https://github.com/responsibleai/agent-hooks.git@30e53198dc923e1fcc60e9244ddb1f526d8977c3#subdirectory=sdk/python"
 
-      - name: Assert example governance behavior
-        # Deterministic assertions over the shipped example manifests + a real
-        # crewAI crew (scripted model, no external endpoint): fails the job if a
-        # policy stops denying prompt-injection / exfiltration / PII or a crew is
-        # no longer blocked at pre_model_call — real signal, not just printout.
-        # stdin is closed so crewAI's first-run tracing prompt cannot stall CI.
-        working-directory: agent-governance-python/agt-policies
-        env:
-          CREWAI_TRACING_ENABLED: "false"
+      - name: Cache Ollama model
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.OLLAMA_MODELS }}
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_VERSION }}-${{ env.AGT_DEMO_MODEL_DIGEST }}
+
+      - name: Start Ollama with a safe open-source model
         run: |
-          python -m pytest tests/test_agent_hooks_interceptor.py -v </dev/null
+          set -euo pipefail
+          archive="$RUNNER_TEMP/ollama-linux-amd64.tgz"
+          install_dir="$RUNNER_TEMP/ollama"
+          curl --fail --show-error --location --retry 3 \
+            --output "$archive" \
+            "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64.tgz"
+          echo "${OLLAMA_V0_5_7_LINUX_AMD64_SHA256}  ${archive}" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar --extract --gzip --file "$archive" --directory "$install_dir"
+          export PATH="$install_dir/bin:$PATH"
+          echo "$install_dir/bin" >> "$GITHUB_PATH"
+
+          mkdir -p "$OLLAMA_MODELS"
+          ollama serve >/tmp/ollama.log 2>&1 &
+          is_up() { curl -fsS "http://127.0.0.1:11434/api/version" >/dev/null 2>&1; }
+          up=0
+          for _ in $(seq 1 30); do
+            if is_up; then up=1; break; fi
+            sleep 2
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "Ollama failed to start" >&2
+            cat /tmp/ollama.log 2>/dev/null || true
+            exit 1
+          fi
+          echo "Ollama is up."
+
+          ollama pull "$AGT_DEMO_MODEL"
+
+          # Verify the pulled model digest against the pinned value so a
+          # tampered or drifted model cannot silently run in the demo gate.
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
+              models = json.load(response).get("models", [])
+          requested = os.environ["AGT_DEMO_MODEL"]
+          accepted = {requested, f"{requested}:latest"}
+          selected = next((m for m in models if m.get("name") in accepted), None)
+          if selected is None:
+              raise SystemExit(f"Pulled model {requested!r} was not listed by Ollama")
+          actual = selected.get("digest", "")
+          expected = os.environ["AGT_DEMO_MODEL_DIGEST"]
+          if actual != expected:
+              raise SystemExit(
+                  f"Model digest mismatch for {requested}: expected {expected}, got {actual}"
+              )
+          print(f"Verified {requested} digest {actual}")
+          PY
+
+      - name: Run the crewAI governance quickstarts (each self-asserts)
+        # Every example exits non-zero if its governance assertion fails; stdin
+        # is closed so crewAI's first-run tracing prompt cannot stall the runner.
+        working-directory: agent-governance-python/agt-policies/examples/agent_hooks
+        run: |
+          set -euo pipefail
+          for example in \
+            01_single_agent_single_policy \
+            02_multi_agent_multi_policy \
+            03_deny_pre_llm_full_error; do
+            echo "::group::$example"
+            python "$example/run.py" </dev/null
+            echo "::endgroup::"
+          done
