@@ -368,8 +368,8 @@ def test_scan_and_redact_empty_input():
     ],
 )
 def test_ssn_detected_across_all_separators(ssn: str):
-    """PII detection must not diverge from integrations/base.py, which broadened
-    the SSN pattern to space/dot/dash/none. Regression for issue #3239."""
+    """PII detection must cover the same SSN separator variants as integrations/base.py
+    (space/dot/dash/none). Regression for issue #3239."""
     matches = CredentialRedactor.find_pii_matches(f"employee ssn {ssn} on file")
     assert any(m.name == "US SSN" and m.matched_text == ssn for m in matches)
 
