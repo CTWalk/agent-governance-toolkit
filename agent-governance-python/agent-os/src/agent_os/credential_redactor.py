@@ -171,12 +171,11 @@ class CredentialRedactor:
         ),
         CredentialPattern(
             name="US SSN",
-            # Mirror the broadened SSN pattern used by integrations/base.py and
-            # the YAML policy packs: accept space, dot, dash, or no separator so
-            # detection does not diverge across the codebase (see issue #3239).
-            # Use the lookaround idiom documented above rather than ``\b``:
-            # ``\b`` treats ``_`` as a word character, so an SSN glued to one
-            # (``employee_123-45-6789``) has no boundary and would be missed.
+            # Use the same core SSN digit/separator pattern as integrations/base.py and
+            # the YAML policy packs (space, dot, dash, or no separator) so detection
+            # does not diverge across the codebase (see issue #3239).
+            # We use the lookaround idiom documented above instead of ``\b`` so SSNs
+            # adjacent to ``_`` (e.g. ``employee_123-45-6789``) are still detected.
             pattern=re.compile(
                 r"(?<![A-Za-z0-9])\d{3}[\s.-]?\d{2}[\s.-]?\d{4}(?![A-Za-z0-9])"
             ),
