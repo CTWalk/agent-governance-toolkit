@@ -372,3 +372,23 @@ def test_ssn_detected_across_all_separators(ssn: str):
     the SSN pattern to space/dot/dash/none. Regression for issue #3239."""
     matches = CredentialRedactor.find_pii_matches(f"employee ssn {ssn} on file")
     assert any(m.name == "US SSN" and m.matched_text == ssn for m in matches)
+
+
+def test_ssn_glued_to_a_word_character_is_detected():
+    """A word boundary treats ``_`` as a word character, so an SSN glued to one
+    escaped detection. Regression for the review feedback on #3353."""
+    matches = CredentialRedactor.find_pii_matches("employee_123-45-6789")
+    assert any(m.name == "US SSN" for m in matches)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "order 1234567890 shipped",   # ten digits, not an SSN
+        "build 12-34-5678 tagged",    # wrong digit grouping
+    ],
+)
+def test_ssn_pattern_does_not_overmatch(text: str):
+    assert not any(
+        m.name == "US SSN" for m in CredentialRedactor.find_pii_matches(text)
+    )

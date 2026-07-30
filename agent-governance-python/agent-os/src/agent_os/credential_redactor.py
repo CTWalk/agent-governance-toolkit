@@ -174,7 +174,12 @@ class CredentialRedactor:
             # Mirror the broadened SSN pattern used by integrations/base.py and
             # the YAML policy packs: accept space, dot, dash, or no separator so
             # detection does not diverge across the codebase (see issue #3239).
-            pattern=re.compile(r"\b\d{3}[\s.-]?\d{2}[\s.-]?\d{4}\b"),
+            # Use the lookaround idiom documented above rather than ``\b``:
+            # ``\b`` treats ``_`` as a word character, so an SSN glued to one
+            # (``employee_123-45-6789``) has no boundary and would be missed.
+            pattern=re.compile(
+                r"(?<![A-Za-z0-9])\d{3}[\s.-]?\d{2}[\s.-]?\d{4}(?![A-Za-z0-9])"
+            ),
         ),
         CredentialPattern(
             name="Credit card number",
