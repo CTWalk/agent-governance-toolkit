@@ -11,8 +11,13 @@ import rego.v1
 
 # Bundle-level fallback plus per-intervention-point queries. The manifest binds
 # pre_tool_call and post_tool_call to the specific rules below; verdict covers
-# any other point.
-default verdict := {"decision": "allow"}
+# any other point and fails closed, so a seam routed to the generic query
+# without a matching rule here denies instead of silently allowing.
+default verdict := {
+	"decision": "deny",
+	"reason": "unbound_intervention_point",
+	"message": "No rule in this bundle covers this intervention point; failing closed.",
+}
 
 default post_tool_call_verdict := {"decision": "allow"}
 
@@ -27,7 +32,11 @@ verdict := pre_tool_call_verdict if input.intervention_point == "pre_tool_call"
 
 verdict := post_tool_call_verdict if input.intervention_point == "post_tool_call"
 
-judge_label := lower(object.get(object.get(input.annotations, "intent_judge", {}), "label", ""))
+# Exact comparison, no case folding: the annotator's system prompt pins the
+# label to lowercase "safe"/"destructive", and the Python policy this bundle
+# replaced compared the raw label with == "safe". Any other casing is treated
+# as an unexpected label and fails closed to deny.
+judge_label := object.get(object.get(input.annotations, "intent_judge", {}), "label", "")
 
 pre_tool_call_verdict := {"decision": "allow"} if judge_label == "safe"
 

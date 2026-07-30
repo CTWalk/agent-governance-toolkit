@@ -66,6 +66,11 @@ Load the manifest, then wrap your `AgentsClient` with `guard_foundry_agent`. Tha
 one call routes every tool the model requests through the policy at the run-loop
 seam and submits a rejection instead of executing a denied call.
 
+`foundry_governance.acs.yaml` references its Azure endpoint, deployment, and
+api_version from the environment, which is why `build_control` in the example
+injects them rather than calling `from_path` directly. A deployment with a fixed
+endpoint can commit those fields and use the `from_path` one-liner below.
+
 ```python
 from azure.ai.agents import AgentsClient
 from azure.ai.agents.models import FunctionTool
@@ -99,11 +104,6 @@ with client:
 Create the agent without auto function calling, as above. If Foundry runs the
 tool for you, ACS never sees the seam. The guarded handle blocks the auto-call
 paths so that bypass is unreachable.
-
-`foundry_governance.acs.yaml` references its Azure endpoint, deployment, and
-api_version from the environment, which is why `build_control` in the example
-injects them rather than calling `from_path` directly. A deployment with a fixed
-endpoint can commit those fields and use the `from_path` one-liner above.
 
 ## Run it
 
