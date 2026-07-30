@@ -361,6 +361,13 @@ jobs:
           # declare every agt-policies transitive dependency itself.
           pip install --no-cache-dir "pydantic>=2.5.0,<3.0" "pyyaml>=6.0,<7.0"
           pip install --no-cache-dir --no-deps -e agent-governance-python/agt-policies
+          # agent-mesh's dev extra pins agent_hypervisor>=5.0.0 (its ring tests
+          # exercise the hypervisor). PyPI tops out at the pre-consolidation
+          # 3.7.0 wheel, which ships real code that would collide with the
+          # `hypervisor` top-level package force-included by -core. Satisfy the
+          # pin from the local dep-only stub so pip never falls back to PyPI;
+          # the actual source is imported via the editable -core install above.
+          pip install --no-cache-dir --no-deps -e agent-governance-python/agent-hypervisor
       - name: Install OPA (ACS-backed Python policy runtime)
         # The native ACS runtime evaluates policy via OPA; without it the
         # runtime fails closed (runtime_error:policy_invocation_failed) and
