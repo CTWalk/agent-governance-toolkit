@@ -213,6 +213,29 @@ def test_builder_validates_agent_and_session_ids() -> None:
         SnapshotBuilder(agent_id="bot", cost_usd=-0.01)
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_builder_rejects_non_finite_budget_counters(bad: float) -> None:
+    """Non-finite cost/elapsed must be rejected at every mutation surface.
+
+    NaN reaches OPA as a non-number, so budgets.rego's malformed-counter deny
+    fires on every subsequent evaluation (deny-all DoS); inf compares >= any
+    limit. The session validator alone did not cover the builder, which is the
+    reachable counter owner via ``session.builder`` / the envelope ctor.
+    """
+    with pytest.raises(ValueError, match="finite"):
+        SnapshotBuilder(agent_id="bot", session_id="s", cost_usd=bad)
+    with pytest.raises(ValueError, match="finite"):
+        SnapshotBuilder(agent_id="bot", session_id="s", elapsed_seconds=bad)
+
+    b = SnapshotBuilder(agent_id="bot", session_id="s")
+    with pytest.raises(ValueError, match="finite"):
+        b.record_cost(bad)
+    with pytest.raises(ValueError, match="finite"):
+        b.record_elapsed(bad)
+    assert b.cost_usd == 0.0
+    assert b.elapsed_seconds == 0.0
+
+
 def test_builder_emits_each_intervention_point_with_running_budgets() -> None:
     b = SnapshotBuilder(
         agent_id="bot",
@@ -339,9 +362,7 @@ def test_builder_envelope_method_emits_bare_envelope() -> None:
 
 
 def test_builder_record_tool_call_then_post_tool_call_snapshot() -> None:
-    # End-to-end mutation: post a tool call, advance budgets, see new
-    # value on the next snapshot. Matches the v4 ExecutionContext.call_count
-    # += 1 flow.
+    # Post a tool call, advance budgets, and observe the next snapshot.
     b = SnapshotBuilder(agent_id="bot")
     first = b.pre_tool_call(tool_name="t", args={})
     assert first["envelope"]["budgets"]["tool_call_count"] == 0
