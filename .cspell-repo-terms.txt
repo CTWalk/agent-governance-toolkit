@@ -107,6 +107,7 @@ contentsource
 contenttype
 contextlib
 contoso
+Convs
 coro
 Cpus
 crds
@@ -879,6 +880,10 @@ unvalidated
 userinfo
 winres
 worktree
+commonpath
+mktemp
+mkstemp
+fdopen
 
 # --- African regulatory policy terms ---
 POPIA
@@ -945,3 +950,19 @@ spanid
 parentspanid
 agtsignature
 agtsignaturealg
+GROUPREF
+
+# --- Python test suite code identifiers and scenario names ---
+adtech
+junitxml
+addoption
+addinivalue
+getoption
+asdict
+
+# --- Docker / BuildKit toolchain terms ---
+moby
+buildkit
+
+# discarded-verdict census (tests/test_transform_never_dropped.py)
+DISCARDABLE

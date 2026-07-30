@@ -14,16 +14,22 @@ verifies the SDK builds before running this suite.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import threading
 import time
 from typing import Any
 
 import pytest
+import yaml
 
 pytest.importorskip("agent_control_specification")
 
-from agt.policies import EvaluationResult, SnapshotBuilder  # noqa: E402
+from agt.policies import (  # noqa: E402
+    AgtManifest,
+    PolicyEvaluation,
+    SnapshotBuilder,
+)
 from agt.policies.runtime import AgtRuntime, ApprovalDecision  # noqa: E402
 
 
@@ -84,6 +90,12 @@ def _snapshot() -> dict[str, Any]:
     )
 
 
+def _manifest_mapping() -> dict[str, Any]:
+    manifest = yaml.safe_load(_MANIFEST)
+    assert isinstance(manifest, dict)
+    return manifest
+
+
 # ── verdict round-trips ────────────────────────────────────────────
 
 
@@ -93,14 +105,168 @@ def test_runtime_returns_allow_evaluation_result(tmp_path: Path) -> None:
 
     result = runtime.evaluate_intervention_point("pre_tool_call", _snapshot())
 
-    assert isinstance(result, EvaluationResult)
+    assert isinstance(result, PolicyEvaluation)
     assert result.verdict == "allow"
-    assert result.allowed is True
+    assert result.is_allowed() is True
     assert result.transform is None
     assert result.evidence is None
     assert result.input_identity is not None
     assert result.enforced_identity == result.input_identity
     assert len(policy.invocations) == 1
+
+
+def test_native_evaluate_returns_only_v5_contract(tmp_path: Path) -> None:
+    policy = _ScriptedPolicy(
+        [
+            {
+                "decision": "deny",
+                "reason": "blocked_tool",
+                "message": "blocked",
+                "result_labels": ["security", "tool"],
+            }
+        ]
+    )
+    runtime = AgtRuntime.from_manifest(
+        _manifest_mapping(),
+        base_dir=tmp_path,
+        policy_dispatcher=policy,
+    )
+
+    result = runtime.evaluate("pre_tool_call", _snapshot())
+
+    assert isinstance(result, PolicyEvaluation)
+    assert result.verdict == "deny"
+    assert result.reason_code == "policy:blocked_tool"
+    assert result.intervention_point == "pre_tool_call"
+    assert result.result_labels == ("security", "tool")
+    assert result.audit_record()["schema"] == "agt.policy_evaluation.v1"
+    assert "allowed" not in PolicyEvaluation.model_fields
+    assert "category" not in PolicyEvaluation.model_fields
+    assert "policy_id" not in PolicyEvaluation.model_fields
+    assert "rule_id" not in PolicyEvaluation.model_fields
+
+
+@pytest.mark.parametrize("source_kind", ["path", "mapping", "typed", "text"])
+def test_from_manifest_accepts_all_native_sources(
+    tmp_path: Path, source_kind: str
+) -> None:
+    policy = _ScriptedPolicy([{"decision": "allow"}])
+    path = _write_manifest(tmp_path)
+    mapping = _manifest_mapping()
+    if source_kind == "path":
+        source: Any = path
+        kwargs: dict[str, Any] = {}
+    elif source_kind == "mapping":
+        source = mapping
+        kwargs = {"base_dir": tmp_path}
+    elif source_kind == "typed":
+        source = AgtManifest.from_document(mapping, base_dir=tmp_path)
+        kwargs = {}
+    else:
+        source = _MANIFEST
+        kwargs = {"base_dir": tmp_path}
+
+    runtime = AgtRuntime.from_manifest(
+        source,
+        policy_dispatcher=policy,
+        **kwargs,
+    )
+
+    assert runtime.manifest is not None
+    assert runtime.evaluate("pre_tool_call", _snapshot()).verdict == "allow"
+
+
+def test_from_manifest_rejects_provenance_free_relative_refs() -> None:
+    manifest = _manifest_mapping()
+    manifest["policies"]["test_policy"]["bundle"] = "./policy"
+
+    with pytest.raises(ValueError, match="base_dir is required"):
+        AgtRuntime.from_manifest(manifest)
+
+
+def test_from_manifest_refuses_unenforced_limits(tmp_path: Path) -> None:
+    manifest = _manifest_mapping()
+    manifest["limits"] = {"max_snapshot_bytes": 1024}
+
+    with pytest.raises(ValueError, match="refusing to accept unenforced limits"):
+        AgtRuntime.from_manifest(manifest, base_dir=tmp_path)
+
+
+def test_runtime_is_shareable_when_host_dispatchers_are_thread_safe(
+    tmp_path: Path,
+) -> None:
+    class _ThreadSafeAllowPolicy:
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.calls = 0
+
+        def evaluate(self, invocation):  # type: ignore[no-untyped-def]
+            with self.lock:
+                self.calls += 1
+            return {"decision": "allow"}
+
+    policy = _ThreadSafeAllowPolicy()
+    runtime = AgtRuntime.from_manifest(
+        _manifest_mapping(),
+        base_dir=tmp_path,
+        policy_dispatcher=policy,
+    )
+
+    def evaluate(session: int) -> str:
+        snapshot = SnapshotBuilder(
+            agent_id="bot", session_id=f"s-{session}"
+        ).pre_tool_call(tool_name="lookup", args={"q": session})
+        result = runtime.evaluate("pre_tool_call", snapshot)
+        assert result.input_identity is not None
+        return result.input_identity
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        identities = list(pool.map(evaluate, range(16)))
+
+    assert len(set(identities)) == 16
+    assert policy.calls == 16
+
+
+def test_shared_runtime_keeps_concurrent_approval_identities_isolated(
+    tmp_path: Path,
+) -> None:
+    class _ThreadSafeEscalatePolicy:
+        def evaluate(self, invocation):  # type: ignore[no-untyped-def]
+            return {"decision": "escalate", "reason": "approval_required"}
+
+    seen: list[str] = []
+    seen_lock = threading.Lock()
+
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
+        assert ip == "pre_tool_call"
+        assert result.enforced_identity is not None
+        with seen_lock:
+            seen.append(result.enforced_identity)
+        return ApprovalDecision.allow(result.enforced_identity)
+
+    manifest = _manifest_mapping()
+    manifest["approval"] = {}
+    runtime = AgtRuntime.from_manifest(
+        manifest,
+        base_dir=tmp_path,
+        policy_dispatcher=_ThreadSafeEscalatePolicy(),
+        approval_resolver=resolver,
+    )
+
+    def evaluate(session: int) -> str:
+        snapshot = SnapshotBuilder(
+            agent_id="bot", session_id=f"approval-{session}"
+        ).pre_tool_call(tool_name="lookup", args={"q": session})
+        result = runtime.evaluate("pre_tool_call", snapshot)
+        assert result.verdict == "allow"
+        assert result.enforced_identity is not None
+        return result.enforced_identity
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        identities = list(pool.map(evaluate, range(12)))
+
+    assert len(set(identities)) == 12
+    assert set(seen) == set(identities)
 
 
 def test_runtime_returns_deny_evaluation_result(tmp_path: Path) -> None:
@@ -112,10 +278,10 @@ def test_runtime_returns_deny_evaluation_result(tmp_path: Path) -> None:
     result = runtime.evaluate_intervention_point("pre_tool_call", _snapshot())
 
     assert result.verdict == "deny"
-    assert result.allowed is False
-    assert result.reason == "blocked_tool"
+    assert result.is_allowed() is False
+    assert result.reason_code == "policy:blocked_tool"
     assert result.message == "nope"
-    assert result.audit_entry["verdict"] == "deny"
+    assert result.audit_record()["verdict"] == "deny"
 
 
 def test_runtime_returns_warn_evaluation_result(tmp_path: Path) -> None:
@@ -127,8 +293,8 @@ def test_runtime_returns_warn_evaluation_result(tmp_path: Path) -> None:
     result = runtime.evaluate_intervention_point("pre_tool_call", _snapshot())
 
     assert result.verdict == "warn"
-    assert result.allowed is True
-    assert result.reason == "drift_detected"
+    assert result.is_allowed() is True
+    assert result.reason_code == "policy:drift_detected"
 
 
 def test_runtime_applies_transform_verdict(tmp_path: Path) -> None:
@@ -149,10 +315,10 @@ def test_runtime_applies_transform_verdict(tmp_path: Path) -> None:
     result = runtime.evaluate_intervention_point("pre_tool_call", _snapshot())
 
     assert result.verdict == "transform"
-    assert result.allowed is True
+    assert result.is_allowed() is True
     assert result.transform is not None
-    assert result.transform["path"] == "$policy_target.q"
-    assert result.transform["value"] == "[REDACTED]"
+    assert result.transform.path == "$policy_target.q"
+    assert result.transform.value == "[REDACTED]"
     # AGT D1.4 prescribes that input_identity and enforced_identity are
     # bisected for transform verdicts; the current native binding only
     # exposes a single identity that surfaces under both fields. The
@@ -164,7 +330,7 @@ def test_runtime_applies_transform_verdict(tmp_path: Path) -> None:
     # The runtime mirrors the engine-applied target under
     # ``transform.applied_value`` for callers that want the materialised
     # rewrite without re-running the path resolution.
-    assert result.transform["applied_value"] == {"q": "[REDACTED]"}
+    assert result.transform.applied_value == {"q": "[REDACTED]"}
 
 
 def test_runtime_routes_escalate_through_resolver_allow(tmp_path: Path) -> None:
@@ -174,7 +340,7 @@ def test_runtime_routes_escalate_through_resolver_allow(tmp_path: Path) -> None:
 
     seen: dict[str, Any] = {}
 
-    def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         seen["ip"] = ip
         seen["enforced_identity"] = result.enforced_identity
         return ApprovalDecision.allow(result.enforced_identity)  # type: ignore[arg-type]
@@ -193,7 +359,7 @@ def test_runtime_routes_escalate_through_resolver_allow(tmp_path: Path) -> None:
     # the verdict to ``allow`` so callers do not need to special-case
     # the escalate state.
     assert result.verdict == "allow"
-    assert result.allowed is True
+    assert result.is_allowed() is True
 
 
 def test_runtime_evaluate_only_mode_does_not_invoke_resolver(tmp_path: Path) -> None:
@@ -203,7 +369,7 @@ def test_runtime_evaluate_only_mode_does_not_invoke_resolver(tmp_path: Path) -> 
 
     called = {"value": False}
 
-    def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         called["value"] = True
         return ApprovalDecision.allow(result.enforced_identity)  # type: ignore[arg-type]
 
@@ -243,8 +409,8 @@ def test_runtime_round_trips_evidence_from_verdict(tmp_path: Path) -> None:
 
     assert result.verdict == "allow"
     assert result.evidence is not None
-    assert result.evidence["artefact"] == "sha256:abcdef"
-    assert result.evidence["verification_pointers"] == {
+    assert result.evidence.artefact == "sha256:abcdef"
+    assert result.evidence.verification_pointers == {
         "issuer_pubkey": "https://example.com/keys/2026.pem",
         "policy_registry": "https://example.com/policies/v1/",
     }
@@ -255,7 +421,7 @@ def test_runtime_resolver_identity_mismatch_blocks(tmp_path: Path) -> None:
         [{"decision": "escalate", "reason": "approval_required"}]
     )
 
-    def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         # Approving the wrong identity MUST be caught by the runtime
         # per AGT-DELTA D1.4 / ACS 17.1.
         return ApprovalDecision.allow("sha256:" + "0" * 64)
@@ -268,9 +434,9 @@ def test_runtime_resolver_identity_mismatch_blocks(tmp_path: Path) -> None:
 
     result = runtime.evaluate_intervention_point("pre_tool_call", _snapshot())
 
-    assert result.allowed is False
+    assert result.is_allowed() is False
     assert result.verdict == "deny"
-    assert result.reason == "runtime_error:approval_action_mismatch"
+    assert result.reason_code == "runtime_error:approval_action_mismatch"
 
 
 def test_runtime_escalate_with_no_resolver_fails_closed(tmp_path: Path) -> None:
@@ -283,7 +449,7 @@ def test_runtime_escalate_with_no_resolver_fails_closed(tmp_path: Path) -> None:
 
     # No resolver -> deny per ACS enforce-mode contract.
     assert result.verdict == "deny"
-    assert result.allowed is False
+    assert result.is_allowed() is False
 
 
 def test_runtime_resolver_deny_blocks(tmp_path: Path) -> None:
@@ -291,7 +457,7 @@ def test_runtime_resolver_deny_blocks(tmp_path: Path) -> None:
         [{"decision": "escalate", "reason": "approval_required"}]
     )
 
-    def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         return ApprovalDecision.deny()
 
     runtime = AgtRuntime(
@@ -303,39 +469,7 @@ def test_runtime_resolver_deny_blocks(tmp_path: Path) -> None:
     result = runtime.evaluate_intervention_point("pre_tool_call", _snapshot())
 
     assert result.verdict == "deny"
-    assert result.allowed is False
-
-
-def test_runtime_resolution_bundle_is_owned_and_cleaned_up(tmp_path: Path) -> None:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    action_path = root / "agent.py"
-    action_path.write_text("# agent\n", encoding="utf-8")
-    (root / "governance.yaml").write_text(
-        """
-rules: []
-intervention_points:
-  pre_tool_call:
-    policy_target: $.tool_call.args
-    policy_target_kind: tool_args
-    tool_name_from: $.tool_call.name
-    policy:
-      id: agt_legacy_rules
-tools:
-  lookup:
-    clearance: public
-""",
-        encoding="utf-8",
-    )
-
-    runtime = AgtRuntime(action_path, resolution_root=root)
-    bundle_dir = Path(runtime._resolution_bundle_dir.name)  # type: ignore[union-attr]
-    assert bundle_dir.exists()
-    assert root not in bundle_dir.parents
-
-    runtime.close()
-
-    assert not bundle_dir.exists()
+    assert result.is_allowed() is False
 
 
 @pytest.mark.parametrize(
@@ -360,7 +494,7 @@ def test_runtime_hanging_sync_resolver_honors_timeout_policy(
     )
     blocker = threading.Event()
 
-    def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         blocker.wait()
         return ApprovalDecision.allow(result.enforced_identity)  # type: ignore[arg-type]
 
@@ -379,10 +513,10 @@ def test_runtime_hanging_sync_resolver_honors_timeout_policy(
 
     assert elapsed < 0.5
     assert result.verdict == expected_verdict
-    assert result.allowed == expected_allowed
-    assert result.audit_entry["approval_timeout"]
+    assert result.is_allowed() == expected_allowed
+    assert result.approval["timeout"]
     if expected_verdict == "deny":
-        assert result.reason == "runtime_error:approval_timeout"
+        assert result.reason_code == "runtime_error:approval_timeout"
 
 
 @pytest.mark.parametrize(
@@ -407,7 +541,7 @@ def test_runtime_hanging_async_resolver_is_cancelled_on_timeout(
     )
     cancelled = threading.Event()
 
-    async def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    async def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -428,8 +562,8 @@ def test_runtime_hanging_async_resolver_is_cancelled_on_timeout(
     assert elapsed < 0.5
     assert cancelled.wait(1.0)
     assert result.verdict == expected_verdict
-    assert result.allowed == expected_allowed
-    assert result.audit_entry["approval_timeout"]
+    assert result.is_allowed() == expected_allowed
+    assert result.approval["timeout"]
 
 
 def test_runtime_async_resolver_foreign_loop_bound_awaitable_fails_closed(
@@ -441,7 +575,7 @@ def test_runtime_async_resolver_foreign_loop_bound_awaitable_fails_closed(
     foreign_loop = asyncio.new_event_loop()
     foreign_future = foreign_loop.create_future()
 
-    async def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    async def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         await foreign_future
         return ApprovalDecision.allow(result.enforced_identity)  # pragma: no cover
 
@@ -461,8 +595,8 @@ def test_runtime_async_resolver_foreign_loop_bound_awaitable_fails_closed(
 
     assert elapsed < 0.5
     assert result.verdict == "deny"
-    assert not result.allowed
-    assert result.reason == "runtime_error:approval_timeout"
+    assert not result.is_allowed()
+    assert result.reason_code == "runtime_error:approval_timeout"
 
 
 @pytest.mark.parametrize(
@@ -482,7 +616,7 @@ def test_runtime_invalid_timeout_values_fail_closed_immediately(
     )
     called = {"value": False}
 
-    def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         called["value"] = True
         return ApprovalDecision.allow(result.enforced_identity)  # type: ignore[arg-type]
 
@@ -499,8 +633,8 @@ def test_runtime_invalid_timeout_values_fail_closed_immediately(
     assert elapsed < 0.5
     assert not called["value"]
     assert result.verdict == "deny"
-    assert not result.allowed
-    assert result.reason == "runtime_error:approval_timeout"
+    assert not result.is_allowed()
+    assert result.reason_code == "runtime_error:approval_timeout"
 
 
 def test_runtime_missing_timeout_uses_fail_closed_default(tmp_path: Path) -> None:
@@ -518,7 +652,7 @@ def test_runtime_resolver_result_just_before_timeout_is_used(tmp_path: Path) -> 
         [{"decision": "escalate", "reason": "approval_required"}]
     )
 
-    def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+    def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
         time.sleep(0.01)
         return ApprovalDecision.allow(result.enforced_identity)  # type: ignore[arg-type]
 
@@ -531,8 +665,8 @@ def test_runtime_resolver_result_just_before_timeout_is_used(tmp_path: Path) -> 
     result = runtime.evaluate_intervention_point("pre_tool_call", _snapshot())
 
     assert result.verdict == "allow"
-    assert result.allowed
-    assert "approval_timeout" not in result.audit_entry
+    assert result.is_allowed()
+    assert not result.approval.get("timeout", False)
 
 
 def test_runtime_timeout_threads_are_daemon_and_non_daemon_count_is_bounded(
@@ -549,7 +683,7 @@ def test_runtime_timeout_threads_are_daemon_and_non_daemon_count_is_bounded(
                 [{"decision": "escalate", "reason": f"approval_required_{index}"}]
             )
 
-            def resolver(ip: str, result: EvaluationResult) -> ApprovalDecision:
+            def resolver(ip: str, result: PolicyEvaluation) -> ApprovalDecision:
                 blocker.wait()
                 return ApprovalDecision.deny()
 
@@ -576,55 +710,3 @@ def test_runtime_timeout_threads_are_daemon_and_non_daemon_count_is_bounded(
     finally:
         for blocker in blockers:
             blocker.set()
-
-
-def test_runtime_resolution_root_pre_resolves_manifest(tmp_path: Path) -> None:
-    # End-to-end: the runtime should walk the AGT manifest-resolution
-    # layer when given a resolution_root, materialise the merged Rego
-    # bundle, and stand up the engine on it. Uses OPA via the bundled
-    # default policy dispatcher so this test is skipped when ``opa`` is
-    # not on PATH.
-    import shutil
-
-    if shutil.which("opa") is None:
-        pytest.skip("opa binary required for resolution end-to-end test")
-
-    governance = {
-        "rules": [
-            {
-                "name": "deny_dangerous",
-                "condition": {"field": "tool_call.name", "operator": "eq", "value": "rm"},
-                "action": "deny",
-                "priority": 10,
-                "override": False,
-                "message": "rm denied",
-            },
-        ],
-        "tools": {
-            "rm": {"clearance": "public"},
-            "ls": {"clearance": "public"},
-        },
-        "intervention_points": {
-            "pre_tool_call": {
-                "policy_target": "$.tool_call.args",
-                "policy_target_kind": "tool_args",
-                "tool_name_from": "$.tool_call.name",
-                "policy": {"id": "agt_legacy_rules"},
-            }
-        },
-    }
-    import yaml
-
-    (tmp_path / "governance.yaml").write_text(yaml.safe_dump(governance), encoding="utf-8")
-
-    runtime = AgtRuntime(tmp_path, resolution_root=tmp_path)
-
-    # A matching call denies.
-    snap = SnapshotBuilder(agent_id="bot").pre_tool_call(tool_name="rm", args={})
-    result = runtime.evaluate_intervention_point("pre_tool_call", snap)
-    assert result.verdict == "deny"
-
-    # A non-matching call falls through to default-allow.
-    snap2 = SnapshotBuilder(agent_id="bot").pre_tool_call(tool_name="ls", args={})
-    result2 = runtime.evaluate_intervention_point("pre_tool_call", snap2)
-    assert result2.verdict == "allow"
