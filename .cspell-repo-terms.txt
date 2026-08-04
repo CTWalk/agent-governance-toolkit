@@ -969,3 +969,26 @@ zerofrom
 zerotrie
 zerovec
 zoneinfo
+
+# --- Documentation site and ACS integration terms ---
+AgentRateLimiter
+AEDT
+anthonyonazure
+Bigspin
+Clendenen
+Ecommerce
+externalidentity
+fnmatchcase
+Janssen
+KillSwitch
+langgenius
+MCPGateway
+MCPSecurityScanner
+Merchantlife
+PIICRI
+RateLimitMiddleware
+resourceid
+RingBreachDetector
+RingElevationManager
+SpendGuard
+Vercel
