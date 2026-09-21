@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `runtime=` plus explicit `SandboxConfig`.
 
 ### Fixed
+- **Python tool adapters advance `tool_call_count`** — `guard_tool()`, `guard_mcp_tool()`, `guard_langchain_tool()`, the Semantic Kernel helpers, `guard_foundry_agent()` and `AgentControl.run_tool()` / `protect_tool()` accept a `SnapshotBuilder` as `snapshot=`. Each call is then evaluated against the builder's current envelope and `tool_call_count` advances once the pre-check permits it, so a `budgets` cap on tool calls no longer fails open, including for concurrent calls on one builder. A plain mapping is unchanged: the host advances the counters. Hosts must not also call `record_tool_call` for calls governed this way. The LiteLLM proxy guardrail is not covered and still evaluates from a fixed mapping.
 - **`agentmesh` package import cost** — `agentmesh/__init__.py` imported every
   layer (client, identity, trust, reward, telemetry) eagerly at module level,
   so `import agentmesh.governance` alone cost ~3.5s cold, dominated by

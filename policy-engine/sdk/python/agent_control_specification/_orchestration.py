@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from types import MappingProxyType
 
 from ._client import AnnotatorDispatcher, NativeRuntimeClient, PolicyDispatcher, RuntimeClient
+from ._host import SnapshotSource, merge_snapshot
 from ._telemetry import TelemetryEvent, TelemetrySink, _coerce_sink
 from ._types import (
     AgentControlBlocked,
@@ -270,10 +271,10 @@ class AgentControl:
         execute: Execute,
         *,
         mode: EnforcementMode | str = EnforcementMode.ENFORCE,
-        snapshot: Mapping[str, JsonValue] | None = None,
+        snapshot: Mapping[str, JsonValue] | SnapshotSource | None = None,
         approval_resolver: ApprovalResolver | None = None,
     ) -> Callable[..., Awaitable[ToolRunResult]]:
-        default_snapshot = dict(snapshot or {})
+        default_snapshot = snapshot if isinstance(snapshot, SnapshotSource) else dict(snapshot or {})
 
         async def guarded_tool(
             args: JsonValue,
@@ -281,7 +282,7 @@ class AgentControl:
             tool_call_id: str | None = None,
             snapshot: Mapping[str, JsonValue] | None = None,
         ) -> ToolRunResult:
-            merged_snapshot = {**default_snapshot, **dict(snapshot or {})}
+            merged_snapshot = merge_snapshot(default_snapshot, snapshot)
             return await self.run_tool(
                 tool_name,
                 args,
@@ -301,33 +302,53 @@ class AgentControl:
         execute: Execute,
         *,
         tool_call_id: str | None = None,
-        snapshot: Mapping[str, JsonValue] | None = None,
+        snapshot: Mapping[str, JsonValue] | SnapshotSource | None = None,
         mode: EnforcementMode | str = EnforcementMode.ENFORCE,
         approval_resolver: ApprovalResolver | None = None,
     ) -> ToolRunResult:
         enforcement_mode = EnforcementMode(mode)
-        ambient = dict(snapshot or {})
+        source = snapshot if isinstance(snapshot, SnapshotSource) else None
+        ambient = {} if source is not None else dict(snapshot or {})
         normalized_tool_call_id = _normalize_tool_call_id(tool_call_id)
         tool_call = _tool_call(tool_name, args, normalized_tool_call_id)
 
-        pre_result = await self.evaluate_intervention_point(
-            InterventionPoint.PRE_TOOL_CALL,
-            {**ambient, "tool_call": tool_call},
-            enforcement_mode,
-        )
-        await self.enforce(
-            InterventionPoint.PRE_TOOL_CALL, pre_result, enforcement_mode, approval_resolver=approval_resolver
-        )
+        def build(
+            intervention_point: InterventionPoint, body: Mapping[str, JsonValue]
+        ) -> dict[str, JsonValue]:
+            if source is not None:
+                return source.build_snapshot(intervention_point.value, body)
+            return {**ambient, **body}
+
+        pre_snapshot = build(InterventionPoint.PRE_TOOL_CALL, {"tool_call": tool_call})
+        if source is not None:
+            # Reserve the slot before the first await, so concurrent calls on
+            # one builder each see the earlier reservations instead of one
+            # stale count. The policy deciding call N still reads N-1.
+            source.record_tool_call()
+        try:
+            pre_result = await self.evaluate_intervention_point(
+                InterventionPoint.PRE_TOOL_CALL, pre_snapshot, enforcement_mode
+            )
+            await self.enforce(
+                InterventionPoint.PRE_TOOL_CALL, pre_result, enforcement_mode, approval_resolver=approval_resolver
+            )
+        except BaseException:
+            # The call does not go ahead, so it does not count.
+            if source is not None:
+                source.release_tool_call()
+            raise
         effective_args = _transformed_or(pre_result, args, enforcement_mode)
 
         tool_result = await _maybe_await(execute(effective_args))
         post_result = await self.evaluate_intervention_point(
             InterventionPoint.POST_TOOL_CALL,
-            {
-                **ambient,
-                "tool_call": _tool_call(tool_name, effective_args, normalized_tool_call_id),
-                "tool_result": tool_result,
-            },
+            build(
+                InterventionPoint.POST_TOOL_CALL,
+                {
+                    "tool_call": _tool_call(tool_name, effective_args, normalized_tool_call_id),
+                    "tool_result": tool_result,
+                },
+            ),
             enforcement_mode,
         )
         await self.enforce(

@@ -5,6 +5,7 @@ import json
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+from .._host import SnapshotSource, merge_snapshot
 from .._orchestration import AgentControl
 from .._types import (
     EnforcementMode,
@@ -61,11 +62,17 @@ def _pop_common_adapter_kwargs(kwargs: dict[str, Any]) -> Mapping[str, JsonValue
     return per_call_snapshot
 
 
+def _default_snapshot(
+    snapshot: Mapping[str, JsonValue] | SnapshotSource | None,
+) -> dict[str, JsonValue] | SnapshotSource:
+    return snapshot if isinstance(snapshot, SnapshotSource) else dict(snapshot or {})
+
+
 def _merge_snapshot(
-    default_snapshot: Mapping[str, JsonValue],
+    default_snapshot: Mapping[str, JsonValue] | SnapshotSource,
     per_call_snapshot: Mapping[str, JsonValue] | None,
-) -> dict[str, JsonValue]:
-    return {**dict(default_snapshot), **dict(per_call_snapshot or {})}
+) -> dict[str, JsonValue] | SnapshotSource:
+    return merge_snapshot(default_snapshot, per_call_snapshot)
 
 
 def _transformed_or(

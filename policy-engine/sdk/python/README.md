@@ -89,6 +89,8 @@ Python framework helpers are duck typed and guard the selected async or sync met
 
 Semantic Kernel helpers are exported as `guard_semantic_kernel_function()` for a single function-like object and `guard_semantic_kernel_filter()` for filter-style invocation contexts. Function wrappers mediate `pre_tool_call` and `post_tool_call`, passing transformed arguments to the function and transformed results back to the host.
 
+Tool wrappers also accept a `SnapshotBuilder` as `snapshot=` in place of a mapping: `guard_tool()`, `guard_mcp_tool()`, `guard_langchain_tool()`, the Semantic Kernel helpers, `guard_foundry_agent()`, and `AgentControl.run_tool()` / `protect_tool()` then build each snapshot from the builder's current envelope and advance `tool_call_count` once the pre-check permits a call, so a `budgets` cap on `tool_call_count` is enforced. A plain mapping is sent unchanged on every call, and the host advances the counters itself. The slot is reserved before the pre-check runs and released if the call is denied, so concurrent calls on one builder share the budget correctly. Do not also call `record_tool_call` for calls the SDK governs this way. The LiteLLM proxy guardrail still evaluates from the mapping it was constructed with and does not take a builder.
+
 Single-tool wrappers accept an optional snapshot-compatible tool call id: pass `tool_call_id=` to `AgentControl.run_tool()` / `protect_tool()`, or `agent_control_tool_call_id=` to adapter helpers such as `guard_tool()` / `guard_mcp_tool()`. When no id is supplied the snapshot omits `tool_call.id`.
 
 ## Telemetry
