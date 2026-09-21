@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, TypeVar
 
 from .._host import SnapshotSource, merge_snapshot
 from .._orchestration import AgentControl
@@ -15,6 +15,7 @@ from .._types import (
 from ._errors import AdapterUnsupportedError
 
 Execute = Callable[..., JsonValue | Awaitable[JsonValue]]
+_T = TypeVar("_T")
 SNAPSHOT_KWARG = "agent_control_snapshot"
 TOOL_CALL_ID_KWARG = "agent_control_tool_call_id"
 
@@ -49,7 +50,7 @@ class _ObjectProxy:
         setattr(object.__getattribute__(self, "_agent_control_target"), name, value)
 
 
-async def _maybe_await(value: JsonValue | Awaitable[JsonValue]) -> JsonValue:
+async def _maybe_await(value: _T | Awaitable[_T]) -> _T:
     if inspect.isawaitable(value):
         return await value
     return value

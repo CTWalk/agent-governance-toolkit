@@ -7,6 +7,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from types import MappingProxyType
+from typing import TypeVar
 
 from ._client import AnnotatorDispatcher, NativeRuntimeClient, PolicyDispatcher, RuntimeClient
 from ._host import SnapshotSource, merge_snapshot
@@ -31,6 +32,7 @@ from ._types import (
 )
 
 Execute = Callable[[JsonValue], JsonValue | Awaitable[JsonValue]]
+_T = TypeVar("_T")
 
 _TELEMETRY_LOGGER = logging.getLogger("agent_control_specification.telemetry")
 
@@ -574,7 +576,7 @@ def _request_invalid_result() -> InterventionPointResult:
     )
 
 
-async def _maybe_await(value: JsonValue | Awaitable[JsonValue]) -> JsonValue:
+async def _maybe_await(value: _T | Awaitable[_T]) -> _T:
     if inspect.isawaitable(value):
         return await value
     return value
