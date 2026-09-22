@@ -70,6 +70,7 @@ AgentGovernance
 Agentflow
 Agentflows
 AgentMesh
+Agentmetry
 AgentOS
 AgentRateLimiter
 Amol
@@ -384,6 +385,7 @@ basenames
 behaviour
 behavioural
 bindgen
+blitzcrieg
 bluebubbles
 bmod
 bubblewrap
