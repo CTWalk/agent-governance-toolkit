@@ -165,7 +165,7 @@ documents = await guarded_tool.ainvoke({"query": "public docs"})
 
 ## Escalation and approval
 
-In enforce mode a `deny` verdict raises `AgentControlBlocked`. An `escalate` verdict consults an optional approval resolver, a host callback that decides whether the action proceeds. Supply a resolver on the instance with `AgentControl(..., approval_resolver=...)` (or `from_native(..., approval_resolver=...)`) or override it per call with the `approval_resolver=` argument on `run()`, `run_tool()`, and `protect_tool()`. The resolver returns `ApprovalResolution.allow(result.action_identity)`, `ApprovalResolution.deny()`, or `ApprovalResolution.suspend(handle=..., action_identity=result.action_identity)`.
+In enforce mode a `deny` verdict raises `AgentControlBlocked`. An `escalate` verdict consults an optional approval resolver, a host callback that decides whether the action proceeds. Supply a resolver on the instance with `AgentControl(..., approval_resolver=...)` (or `from_native(..., approval_resolver=...)`) or override it per call with the `approval_resolver=` argument on `run()`, `run_tool()`, and `protect_tool()`. The resolver returns `ApprovalResolution.allow(result.action_identity)`, `ApprovalResolution.deny(reason)` (the optional `reason` becomes the denial verdict's `message`), or `ApprovalResolution.suspend(handle=..., action_identity=result.action_identity)`.
 
 - allow proceeds with the original action target. `escalate` verdicts do not return or apply transformed targets
 - deny, an unrecognized result, or a resolver that raises blocks with `AgentControlBlocked`

@@ -406,8 +406,14 @@ class HostSession:
             # the policy's own or a reserved host_error the enforcement layer
             # synthesized. Overwriting it with a name of our own destroyed
             # that and invented a reason outside the closed set.
+            blocked_verdict = blocked.result.verdict
+            message = blocked_verdict.message
+            if message is None:
+                message = result.verdict.message
             return _with_decision(
-                result, Decision.DENY, blocked.result.verdict.reason
+                replace(result, verdict=replace(result.verdict, message=message)),
+                Decision.DENY,
+                blocked_verdict.reason,
             )
         except Exception:  # noqa: BLE001 - a broken resolver must not permit
             return _with_decision(

@@ -293,6 +293,35 @@ def test_escalation_blocked_becomes_deny() -> None:
     assert result.verdict.reason == _ESCALATED.verdict.reason
 
 
+def test_escalation_blocked_keeps_the_blocking_message() -> None:
+    """A resolver's refusal reason reaches the session caller on the verdict message."""
+    blocked = InterventionPointResult(
+        Verdict(Decision.DENY, reason="needs-approval", message="ticket CR-42 was rejected", approval={})
+    )
+    result = _escalating_session(AgentControlBlocked(InterventionPoint.INPUT, blocked)).input("x")
+
+    assert result.verdict.decision is Decision.DENY
+    assert result.verdict.reason == "needs-approval"
+    assert result.verdict.message == "ticket CR-42 was rejected"
+
+
+def test_escalation_blocked_without_a_message_keeps_the_policy_message() -> None:
+    """A synthesized block with no message must not erase the policy's own."""
+    blocked = InterventionPointResult(Verdict(Decision.DENY, reason="host_error:approval_identity_mismatch"))
+
+    class _MessagedEscalatingControl(_EscalatingControl):
+        async def evaluate_intervention_point(self, intervention_point, snapshot, mode):
+            return InterventionPointResult(
+                Verdict(Decision.DENY, reason="needs-approval", message="manager sign-off required", approval={})
+            )
+
+    result = HostSession(_MessagedEscalatingControl(AgentControlBlocked(InterventionPoint.INPUT, blocked))).input("x")
+
+    assert result.verdict.decision is Decision.DENY
+    assert result.verdict.reason == "host_error:approval_identity_mismatch"
+    assert result.verdict.message == "manager sign-off required"
+
+
 def test_escalation_suspended_stays_liftable_for_later_resume() -> None:
     """A suspended approval retains its liftable deny for later resume."""
     result = _escalating_session(AgentControlSuspended(InterventionPoint.INPUT, _ESCALATED)).input("x")

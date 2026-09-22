@@ -331,19 +331,24 @@ class ApprovalResolution:
     ``handle`` is an opaque, host-owned value carried on
     :class:`AgentControlSuspended` so the host can later resume the suspended
     interaction. The runtime never stores or interprets it.
+
+    ``reason`` is the resolver's explanation for a refusal. Enforcement copies
+    it onto the denial verdict's ``message``; the verdict's ``reason`` stays
+    the policy's own classified code.
     """
 
     outcome: ApprovalOutcome
     handle: JsonValue | None = None
     action_identity: str | None = None
+    reason: str | None = None
 
     @classmethod
     def allow(cls, action_identity: str) -> "ApprovalResolution":
         return cls(ApprovalOutcome.ALLOW, action_identity=action_identity)
 
     @classmethod
-    def deny(cls) -> "ApprovalResolution":
-        return cls(ApprovalOutcome.DENY)
+    def deny(cls, reason: str | None = None) -> "ApprovalResolution":
+        return cls(ApprovalOutcome.DENY, reason=reason)
 
     @classmethod
     def suspend(cls, handle: JsonValue | None = None, action_identity: str | None = None) -> "ApprovalResolution":

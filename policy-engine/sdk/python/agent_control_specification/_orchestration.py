@@ -6,6 +6,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from types import MappingProxyType
 from typing import TypeVar
 
@@ -410,6 +411,8 @@ class AgentControl:
         if resolution.outcome == ApprovalOutcome.SUSPEND:
             _require_approved_identity(intervention_point, result, original_identity, resolution.action_identity)
             raise AgentControlSuspended(intervention_point, result, resolution.handle)
+        if isinstance(resolution.reason, str) and resolution.reason:
+            result = replace(result, verdict=replace(result.verdict, message=resolution.reason))
         raise AgentControlBlocked(intervention_point, result)
 
     async def agent_startup(
