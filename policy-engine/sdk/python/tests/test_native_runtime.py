@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import pickle
 import unittest
 from pathlib import Path
 
 from agent_control_specification import (
-    DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    action_identity,
     AgentControl,
+    AgentControlRuntimeError,
     Decision,
+    DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     EnforcementMode,
     HostSession,
     InterventionPoint,
-    PerfTelemetry,
-    action_identity,
     parse_manifest,
+    PerfTelemetry,
     validate_manifest,
     validate_manifest_overlay,
 )
@@ -518,6 +520,29 @@ class ZeroConfigDefaultsTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             AgentControl.from_url("http://policy.example/manifest.yaml")
         self.assertIn("runtime_error:manifest_invalid", str(ctx.exception))
+
+    def test_runtime_errors_carry_the_reason_code(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            AgentControl.from_url("http://policy.example/manifest.yaml")
+        error = ctx.exception
+        self.assertIsInstance(error, AgentControlRuntimeError)
+        self.assertEqual(error.reason, "runtime_error:manifest_invalid")
+        self.assertIn("unsupported URL scheme", error.detail)
+        # The message is unchanged, so string-matching callers keep working.
+        self.assertIn("runtime_error:manifest_invalid", str(error))
+        self.assertIn(error.detail, str(error))
+
+    def test_runtime_errors_survive_pickling(self):
+        # Hosts that build controls in process-pool workers get the error back
+        # through pickle; the attributes must survive the round trip.
+        with self.assertRaises(AgentControlRuntimeError) as ctx:
+            AgentControl.from_url("http://policy.example/manifest.yaml")
+        error = ctx.exception
+        restored = pickle.loads(pickle.dumps(error))
+        self.assertIsInstance(restored, AgentControlRuntimeError)
+        self.assertEqual(restored.reason, error.reason)
+        self.assertEqual(restored.detail, error.detail)
+        self.assertEqual(str(restored), str(error))
 
     def test_from_url_pin_is_optional(self):
         # The pin is optional, mirroring URL extends. Omitting it still reaches

@@ -268,6 +268,25 @@ class ToolRunResult:
     post_tool_call_result: InterventionPointResult
 
 
+class AgentControlRuntimeError(RuntimeError):
+    """An engine ``RuntimeError`` with its reserved reason code attached.
+
+    ``reason`` is the ``runtime_error:*`` code the engine reports and
+    ``detail`` its detail text. ``str(exc)`` is unchanged, so callers that
+    match on the message keep working; new callers branch on ``reason``.
+    """
+
+    def __init__(self, message: str, reason: str, detail: str = "") -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.detail = detail
+
+    # ``args`` holds only the message, so the default reduce cannot rebuild the
+    # three-argument constructor when a process pool loads the pickled error.
+    def __reduce__(self):
+        return (type(self), (str(self), self.reason, self.detail))
+
+
 class AgentControlInterruption(RuntimeError):
     """Base for control-flow interruptions raised by enforcing wrappers.
 
@@ -290,6 +309,10 @@ class AgentControlBlocked(AgentControlInterruption):
         self.result = result
         reason = f" ({result.verdict.reason})" if result.verdict.reason else ""
         super().__init__(f"Agent Control Specification blocked {intervention_point.value}{reason}.")
+
+    # Rebuild from the constructor arguments so the error survives pickling.
+    def __reduce__(self):
+        return (type(self), (self.intervention_point, self.result))
 
 
 class AgentControlSuspended(AgentControlInterruption):
@@ -314,6 +337,9 @@ class AgentControlSuspended(AgentControlInterruption):
         super().__init__(
             f"Agent Control Specification suspended {intervention_point.value} pending approval{reason}."
         )
+
+    def __reduce__(self):
+        return (type(self), (self.intervention_point, self.result, self.handle))
 
 
 class ApprovalOutcome(str, Enum):

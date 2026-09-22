@@ -59,6 +59,7 @@ from ._telemetry import (
 from ._types import (
     AgentControlBlocked,
     AgentControlInterruption,
+    AgentControlRuntimeError,
     AgentControlSuspended,
     ApprovalOutcome,
     ApprovalResolution,
@@ -97,6 +98,7 @@ __all__ = [
     "AgentControl",
     "AgentControlBlocked",
     "AgentControlInterruption",
+    "AgentControlRuntimeError",
     "AgentControlSuspended",
     "AnnotatorDispatcher",
     "ApprovalOutcome",

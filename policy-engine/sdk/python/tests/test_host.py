@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import pickle
 
 import pytest
 
@@ -329,6 +330,23 @@ def test_escalation_suspended_stays_liftable_for_later_resume() -> None:
     assert result.verdict.decision is Decision.DENY
     assert result.verdict.approval == {}
     assert result.verdict.reason == "needs-approval"
+
+
+def test_interruptions_survive_pickling() -> None:
+    """Blocked and suspended errors cross process boundaries intact."""
+    blocked = pickle.loads(pickle.dumps(AgentControlBlocked(InterventionPoint.INPUT, _ESCALATED)))
+    assert isinstance(blocked, AgentControlBlocked)
+    assert blocked.intervention_point is InterventionPoint.INPUT
+    assert blocked.result == _ESCALATED
+    assert str(blocked) == str(AgentControlBlocked(InterventionPoint.INPUT, _ESCALATED))
+
+    suspended = pickle.loads(
+        pickle.dumps(AgentControlSuspended(InterventionPoint.INPUT, _ESCALATED, handle={"ticket": "7"}))
+    )
+    assert isinstance(suspended, AgentControlSuspended)
+    assert suspended.intervention_point is InterventionPoint.INPUT
+    assert suspended.result == _ESCALATED
+    assert suspended.handle == {"ticket": "7"}
 
 
 def test_escalation_with_a_broken_resolver_fails_closed() -> None:

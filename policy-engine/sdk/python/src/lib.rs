@@ -11,6 +11,7 @@ use agent_control_specification_core::{
     validate_manifest_yaml,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::import_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::collections::BTreeMap;
@@ -81,8 +82,14 @@ fn py_to_json_value(obj: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     }
 }
 
+import_exception!(agent_control_specification._types, AgentControlRuntimeError);
+
 fn runtime_error(error: RuntimeError) -> PyErr {
-    PyRuntimeError::new_err(error.to_string())
+    AgentControlRuntimeError::new_err((
+        error.to_string(),
+        error.reason().to_string(),
+        error.detail().to_string(),
+    ))
 }
 
 // cspell:ignore pyfunction

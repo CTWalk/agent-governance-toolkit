@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`AgentControlRuntimeError`** - engine runtime errors raised from the Python SDK now carry `reason` (the reserved `runtime_error:*` code) and `detail` as attributes. It subclasses `RuntimeError`, keeps the same message so existing `except RuntimeError` handlers and message matching are unaffected, and survives `pickle`.
 - **`ApprovalResolution.reason`** — a resolver that refuses can say why: `ApprovalResolution.deny(reason)` carries the explanation onto the denial verdict's `message` (through `AgentControl.enforce` and `HostSession`), while the verdict's `reason` keeps the policy's classified code.
 - **ACS artifact validation API** - added one bounded Rust-core validator for canonical manifest schema checks, typed ACS semantics, and OPA Rego parsing, exposed with the same structured result through Rust, Python, Node, and .NET. The `acs-generator` CLI now consumes this shared SDK surface.
 - **Go SDK context accumulation governance** - added workflow-scoped context envelopes, a data-classification sensitivity ladder, aggregation-rule evaluation with unknown-combination escalation, constrain-as-obligations policy mapping, grow-only restriction inheritance, and classified context-transition audit events for parity with the Python implementation (#3084).
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `runtime=` plus explicit `SandboxConfig`.
 
 ### Fixed
+- **`AgentControlBlocked` and `AgentControlSuspended` survive pickling** - both are rebuilt from their constructor arguments when loaded back from a pickle, so they propagate out of `multiprocessing` and `concurrent.futures` process workers instead of failing with a `TypeError`.
 - **Python tool adapters advance `tool_call_count`** — `guard_tool()`, `guard_mcp_tool()`, `guard_langchain_tool()`, the Semantic Kernel helpers, `guard_foundry_agent()` and `AgentControl.run_tool()` / `protect_tool()` accept a `SnapshotBuilder` as `snapshot=`. Each call is then evaluated against the builder's current envelope and `tool_call_count` advances once the pre-check permits it, so a `budgets` cap on tool calls no longer fails open, including for concurrent calls on one builder. A plain mapping is unchanged: the host advances the counters. Hosts must not also call `record_tool_call` for calls governed this way. The LiteLLM proxy guardrail is not covered and still evaluates from a fixed mapping.
 - **`agentmesh` package import cost** — `agentmesh/__init__.py` imported every
   layer (client, identity, trust, reward, telemetry) eagerly at module level,
