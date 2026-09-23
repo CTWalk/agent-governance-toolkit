@@ -460,8 +460,18 @@ SHA-256 hash-chained audit log for tamper detection.
 |---|---|
 | `AuditLogger::new()` | Create an audit logger |
 | `logger.log(agent_id, action, decision)` | Append an audit entry |
+| `logger.log_with_skill_audit_metadata(...)` | Append trusted skill provenance and hash-only context snapshots |
 | `logger.verify()` | Verify chain integrity |
 | `logger.get_entries(filter)` | Query entries by filter |
+
+Use `TrustedSkillMetadataSource::new(...)` only with framework-owned skill
+metadata. `AuditEntry` serializes it as a nested snake_case
+`skill_audit_metadata` object and includes it in the versioned hash chain;
+metadata-free entries retain the legacy hash format. The framework adapter
+hashes request payloads by default when present, parsing valid JSON structurally
+and hashing other payloads as strings. Payload skill fields are never trusted.
+Framework `GovernanceEvent` values themselves are not hash-chained; use
+`AuditLogger` when tamper-evident storage is required.
 
 ### Identity (`identity.rs`)
 
