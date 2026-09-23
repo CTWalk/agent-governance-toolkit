@@ -76,6 +76,7 @@ AgentRateLimiter
 Amol
 Anambra
 Artzain
+Assn
 Authenticode
 BFBFBF
 BLOCKME
@@ -171,6 +172,7 @@ Hyperlight
 IATP
 IGNORECASE
 IPFS
+ISSN
 Initialise
 Jaccard
 Janssen
@@ -1022,6 +1024,7 @@ slugification
 smol
 snupkg
 socat
+socsec
 softmax
 spacy
 spanid
