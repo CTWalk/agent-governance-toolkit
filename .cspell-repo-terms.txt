@@ -892,6 +892,7 @@ pytest
 pytestmark
 pythonhosted
 pythonstartup
+readyz
 pyupgrade
 pyyaml
 qualname

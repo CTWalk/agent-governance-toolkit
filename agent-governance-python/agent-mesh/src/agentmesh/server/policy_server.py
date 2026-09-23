@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from agentmesh.governance.policy import PolicyDecision, PolicyEngine
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 app = create_base_app(
     "policy-server",
     "Evaluates governance policies against agent actions.",
+    include_readyz=False,
 )
 
 POLICY_DIR = os.getenv("AGENTMESH_POLICY_DIR", "/etc/agentmesh/policies")
@@ -39,11 +41,42 @@ _trust_policies: list[TrustPolicy] = []
 _trust_evaluator: PolicyEvaluator | None = None
 _loaded_count: int = 0
 _GOVERNANCE_ONLY_KEYS = frozenset({"agent", "agents", "default_action", "extends", "scope"})
+_effective_rule_count: int = 0
+_load_warnings: list[str] = []
+
+
+@app.get("/readyz", tags=["health"], response_model=None)
+async def readyz() -> JSONResponse:
+    payload = {
+        "status": "ready" if _effective_rule_count > 0 else "not-ready",
+        "component": "policy-server",
+        "total_loaded": _loaded_count,
+        "effective_rules": _effective_rule_count,
+        "policy_dir": POLICY_DIR,
+        "load_warnings": list(_load_warnings),
+    }
+    if _effective_rule_count == 0:
+        return JSONResponse(status_code=503, content=payload)
+    return JSONResponse(content=payload)
+
+
+def _validate_load_warnings() -> None:
+    """Record a warning when a load completes without effective rules."""
+    global _load_warnings
+
+    _load_warnings = []
+    if _effective_rule_count == 0:
+        warning = (
+            f"Policy load validation: no effective rules loaded from {POLICY_DIR}; "
+            "readiness remains blocked until an enabled policy rule is loaded."
+        )
+        logger.warning(warning)
+        _load_warnings.append(warning)
 
 
 def _load_policies() -> None:
     """Load all YAML/JSON policy files from POLICY_DIR."""
-    global _engine, _trust_policies, _trust_evaluator, _loaded_count
+    global _engine, _trust_policies, _trust_evaluator, _loaded_count, _effective_rule_count
 
     policy_path = Path(POLICY_DIR)
     if not policy_path.is_dir():
@@ -58,6 +91,7 @@ def _load_policies() -> None:
     local_engine = PolicyEngine()
     local_trust: list[TrustPolicy] = []
     governance_count = 0
+    effective_rule_count = 0
     errors: list[tuple[str, Exception]] = []
 
     try:
@@ -80,8 +114,9 @@ def _load_policies() -> None:
             continue
 
         try:
-            local_engine.load_yaml(content)
+            policy = local_engine.load_yaml(content)
             governance_count += 1
+            effective_rule_count += sum(rule.enabled for rule in policy.rules)
             logger.info("Loaded governance policy: %s", f.name)
         except Exception as ge:
             try:
@@ -117,8 +152,9 @@ def _load_policies() -> None:
 
     for f in (path for path in discovered if path.suffix == ".json"):
         try:
-            local_engine.load_json(f.read_text(encoding="utf-8"))
+            policy = local_engine.load_json(f.read_text(encoding="utf-8"))
             governance_count += 1
+            effective_rule_count += sum(rule.enabled for rule in policy.rules)
         except Exception as exc:
             errors.append((f.name, exc))
 
@@ -138,11 +174,15 @@ def _load_policies() -> None:
     _trust_evaluator = PolicyEvaluator(_trust_policies) if _trust_policies else None
 
     _loaded_count = governance_count + len(_trust_policies)
+    _effective_rule_count = effective_rule_count + sum(
+        len(policy.rules) for policy in _trust_policies
+    )
     logger.info(
         "Loaded %d governance + %d trust policies",
         governance_count,
         len(_trust_policies),
     )
+    _validate_load_warnings()
 
 
 @app.on_event("startup")
@@ -232,8 +272,10 @@ async def list_policies() -> dict[str, Any]:
     """List all loaded policies."""
     return {
         "total_loaded": _loaded_count,
+        "effective_rules": _effective_rule_count,
         "trust_policies": len(_trust_policies),
         "policy_dir": POLICY_DIR,
+        "load_warnings": list(_load_warnings),
     }
 
 
@@ -251,7 +293,9 @@ async def reload_policies() -> dict[str, Any]:
     return {
         "status": "reloaded",
         "total_loaded": _loaded_count,
+        "effective_rules": _effective_rule_count,
         "trust_policies": len(_trust_policies),
+        "load_warnings": list(_load_warnings),
     }
 
 
