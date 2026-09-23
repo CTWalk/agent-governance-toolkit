@@ -153,6 +153,13 @@ GRPC
 Gazetted
 Ghanaian
 GitHub
+thatjosh
+execdir
+ionice
+setsid
+xargs
+strace
+busybox
 Governorate
 HEALTHCHECK
 HKDF
